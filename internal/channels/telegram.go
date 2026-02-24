@@ -132,6 +132,7 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				v := url.Values{}
 				v.Set("chat_id", out.ChatID)
 				v.Set("text", out.Content)
+				v.Set("parse_mode", "Markdown")
 				resp, err := client.PostForm(u, v)
 				if err != nil {
 					log.Printf("telegram sendMessage error: %v", err)
