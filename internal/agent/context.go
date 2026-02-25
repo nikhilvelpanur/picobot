@@ -63,16 +63,55 @@ func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string,
 	// instruction for memory tool usage
 	msgs = append(msgs, providers.Message{Role: "system", Content: "If you decide something should be remembered, call the tool 'write_memory' with JSON arguments: {\"target\": \"today\"|\"long\", \"content\": \"...\", \"append\": true|false}. Use a tool call rather than plain chat text when writing memory."})
 
-	// Load and include skills context
+	// Load skills selectively: only include full content for skills relevant to
+	// the current message. Other skills get a one-line summary so the model knows
+	// they exist but they don't bloat the context window.
 	loadedSkills, err := cb.skillsLoader.LoadAll()
 	if err != nil {
 		log.Printf("error loading skills: %v", err)
 	}
 	if len(loadedSkills) > 0 {
+		msgLower := strings.ToLower(currentMessage)
+		// Score each skill by keyword overlap with the message
+		type scored struct {
+			skill skills.Skill
+			score int
+		}
+		var scoredSkills []scored
+		for _, skill := range loadedSkills {
+			s := 0
+			nameLower := strings.ToLower(skill.Name)
+			// Exact name mention is a strong signal
+			if strings.Contains(msgLower, nameLower) {
+				s += 10
+			}
+			// Check description words for weaker signal
+			for _, word := range strings.Fields(strings.ToLower(skill.Description)) {
+				if len(word) > 3 && strings.Contains(msgLower, word) {
+					s++
+				}
+			}
+			scoredSkills = append(scoredSkills, scored{skill, s})
+		}
+		// Sort by score descending (simple selection for top 2)
+		const maxFullSkills = 2
+		for i := 0; i < len(scoredSkills) && i < maxFullSkills; i++ {
+			for j := i + 1; j < len(scoredSkills); j++ {
+				if scoredSkills[j].score > scoredSkills[i].score {
+					scoredSkills[i], scoredSkills[j] = scoredSkills[j], scoredSkills[i]
+				}
+			}
+		}
 		var sb strings.Builder
 		sb.WriteString("Available Skills:\n")
-		for _, skill := range loadedSkills {
-			sb.WriteString(fmt.Sprintf("\n## %s\n%s\n\n%s\n", skill.Name, skill.Description, skill.Content))
+		for i, ss := range scoredSkills {
+			if i < maxFullSkills && ss.score > 0 {
+				// Full content for relevant skills
+				sb.WriteString(fmt.Sprintf("\n## %s\n%s\n\n%s\n", ss.skill.Name, ss.skill.Description, ss.skill.Content))
+			} else {
+				// Summary only for non-matching skills
+				sb.WriteString(fmt.Sprintf("\n- **%s**: %s\n", ss.skill.Name, ss.skill.Description))
+			}
 		}
 		msgs = append(msgs, providers.Message{Role: "system", Content: sb.String()})
 	}
@@ -96,12 +135,21 @@ func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string,
 		msgs = append(msgs, providers.Message{Role: "system", Content: sb.String()})
 	}
 
-	// replay history
+	// replay history — parse "role: content" format back into proper roles
 	for _, h := range history {
-		// history items are of the form "role: content"
-		if len(h) > 0 {
-			msgs = append(msgs, providers.Message{Role: "user", Content: h})
+		if len(h) == 0 {
+			continue
 		}
+		role := "user"
+		content := h
+		if idx := strings.Index(h, ": "); idx > 0 && idx < 12 {
+			prefix := h[:idx]
+			if prefix == "user" || prefix == "assistant" || prefix == "system" {
+				role = prefix
+				content = h[idx+2:]
+			}
+		}
+		msgs = append(msgs, providers.Message{Role: role, Content: content})
 	}
 
 	// current

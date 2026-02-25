@@ -193,7 +193,12 @@ func (s *MemoryStore) GetRecentMemories(days int) (string, error) {
 }
 
 // GetMemoryContext returns combined long-term memory + today's notes for the system prompt.
+// Long-term memory is capped at maxLongTermLines lines and today's log at maxTodayLines
+// lines (keeping the most recent entries) to prevent context window bloat.
 func (s *MemoryStore) GetMemoryContext() (string, error) {
+	const maxLongTermLines = 60
+	const maxTodayLines = 40
+
 	lt, err := s.ReadLongTerm()
 	if err != nil {
 		return "", err
@@ -202,6 +207,11 @@ func (s *MemoryStore) GetMemoryContext() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Truncate long-term memory to last N lines
+	lt = truncateToLastN(lt, maxLongTermLines)
+	// Truncate today's log to last N lines (most recent entries)
+	td = truncateToLastN(td, maxTodayLines)
+
 	if lt == "" && td == "" {
 		return "", nil
 	}
@@ -212,4 +222,17 @@ func (s *MemoryStore) GetMemoryContext() (string, error) {
 		return lt, nil
 	}
 	return lt + "\n\n---\n\n" + td, nil
+}
+
+// truncateToLastN keeps only the last n lines of text. Returns empty string if input is empty.
+func truncateToLastN(text string, n int) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) <= n {
+		return text
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
 }

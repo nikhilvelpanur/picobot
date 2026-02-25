@@ -11,7 +11,7 @@ import (
 // Older messages are trimmed on save to keep the session file small
 // and avoid blowing up the LLM context window.
 // Important information should be persisted via write_memory, not session history.
-const MaxHistorySize = 50
+const MaxHistorySize = 20
 
 // Session holds a short chat history.
 type Session struct {
