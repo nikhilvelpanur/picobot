@@ -41,9 +41,18 @@ func NewScheduler(callback FireCallback) *Scheduler {
 }
 
 // Add schedules a new job. Returns the job ID.
+// If a job with the same name already exists, it is replaced (dedup).
 func (s *Scheduler) Add(name, message string, delay time.Duration, channel, chatID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Dedup: remove any existing job with the same name
+	for id, j := range s.jobs {
+		if j.Name == name {
+			log.Printf("cron: replacing existing job %q (%s) with new schedule", name, id)
+			delete(s.jobs, id)
+			break
+		}
+	}
 	s.nextID++
 	id := fmt.Sprintf("job-%d", s.nextID)
 	s.jobs[id] = &Job{
@@ -59,9 +68,18 @@ func (s *Scheduler) Add(name, message string, delay time.Duration, channel, chat
 }
 
 // AddRecurring schedules a recurring job. Returns the job ID.
+// If a recurring job with the same name already exists, it is replaced (dedup).
 func (s *Scheduler) AddRecurring(name, message string, interval time.Duration, channel, chatID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Dedup: remove any existing job with the same name
+	for id, j := range s.jobs {
+		if j.Name == name {
+			log.Printf("cron: replacing existing recurring job %q (%s) with new schedule", name, id)
+			delete(s.jobs, id)
+			break
+		}
+	}
 	s.nextID++
 	id := fmt.Sprintf("job-%d", s.nextID)
 	s.jobs[id] = &Job{
