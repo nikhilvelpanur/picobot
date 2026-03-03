@@ -85,3 +85,82 @@ func TestStartTelegramWithBase(t *testing.T) {
 	// give a small grace period
 	time.Sleep(50 * time.Millisecond)
 }
+
+func TestTelegramSendMarkdownFallback(t *testing.T) {
+	// Server rejects Markdown parse_mode with 400, accepts plain text.
+	calls := make(chan url.Values, 4)
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		calls <- r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		if r.PostForm.Get("parse_mode") == "Markdown" {
+			w.Write([]byte(`{"ok":false,"error_code":400,"description":"Bad Request: can't parse entities"}`))
+			return
+		}
+		w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer h.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	out := chat.Outbound{Channel: "telegram", ChatID: "789", Content: "*   **bold bullet**"}
+	telegramSend(client, h.URL, out)
+
+	// First call should be with Markdown
+	select {
+	case v := <-calls:
+		if v.Get("parse_mode") != "Markdown" {
+			t.Fatalf("expected first call with Markdown, got parse_mode=%q", v.Get("parse_mode"))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for first sendMessage call")
+	}
+
+	// Second call should be without parse_mode (plain text fallback)
+	select {
+	case v := <-calls:
+		if v.Get("parse_mode") != "" {
+			t.Fatalf("expected fallback without parse_mode, got %q", v.Get("parse_mode"))
+		}
+		if v.Get("chat_id") != "789" {
+			t.Fatalf("expected chat_id 789, got %q", v.Get("chat_id"))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for plaintext fallback call")
+	}
+}
+
+func TestTelegramSendSuccess(t *testing.T) {
+	calls := make(chan url.Values, 2)
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		calls <- r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer h.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	out := chat.Outbound{Channel: "telegram", ChatID: "123", Content: "hello world"}
+	telegramSend(client, h.URL, out)
+
+	// Should succeed on first try, only one call
+	select {
+	case v := <-calls:
+		if v.Get("chat_id") != "123" || v.Get("text") != "hello world" {
+			t.Fatalf("unexpected form values: %v", v)
+		}
+		if v.Get("parse_mode") != "Markdown" {
+			t.Fatalf("expected Markdown parse_mode, got %q", v.Get("parse_mode"))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout")
+	}
+
+	// No second call
+	select {
+	case <-calls:
+		t.Fatal("unexpected second call — should have succeeded on first try")
+	case <-time.After(100 * time.Millisecond):
+		// good, no second call
+	}
+}

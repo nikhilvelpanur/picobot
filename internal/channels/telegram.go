@@ -128,21 +128,119 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				log.Println("telegram: stopping outbound sender")
 				return
 			case out := <-outCh:
-				u := base + "/sendMessage"
-				v := url.Values{}
-				v.Set("chat_id", out.ChatID)
-				v.Set("text", out.Content)
-				v.Set("parse_mode", "Markdown")
-				resp, err := client.PostForm(u, v)
-				if err != nil {
-					log.Printf("telegram sendMessage error: %v", err)
-					continue
-				}
-				io.ReadAll(resp.Body)
-				resp.Body.Close()
+				telegramSend(client, base, out)
 			}
 		}
 	}()
 
 	return nil
+}
+
+// telegramAPIResponse is the minimal shape of a Telegram Bot API response.
+type telegramAPIResponse struct {
+	Ok          bool   `json:"ok"`
+	ErrorCode   int    `json:"error_code,omitempty"`
+	Description string `json:"description,omitempty"`
+	Parameters  *struct {
+		RetryAfter int `json:"retry_after,omitempty"`
+	} `json:"parameters,omitempty"`
+}
+
+// telegramSend sends an outbound message via the Telegram Bot API with:
+//   - Markdown parse mode as first attempt
+//   - Automatic plain-text fallback on 400 (Markdown parse errors)
+//   - Retry with backoff on 429 (rate limit)
+//   - Up to 2 retries on 5xx server errors
+//   - Full delivery logging
+func telegramSend(client *http.Client, base string, out chat.Outbound) {
+	u := base + "/sendMessage"
+
+	// First attempt: with Markdown parse mode.
+	v := url.Values{}
+	v.Set("chat_id", out.ChatID)
+	v.Set("text", out.Content)
+	v.Set("parse_mode", "Markdown")
+
+	apiResp, err := doTelegramPost(client, u, v)
+	if err != nil {
+		log.Printf("telegram: send to %s failed (network): %v", out.ChatID, err)
+		return
+	}
+	if apiResp.Ok {
+		log.Printf("telegram: delivered to %s (%d chars)", out.ChatID, len(out.Content))
+		return
+	}
+
+	// 400 — almost always a Markdown parse error. Retry as plain text.
+	if apiResp.ErrorCode == 400 {
+		log.Printf("telegram: markdown rejected for %s (%s), retrying as plain text", out.ChatID, apiResp.Description)
+		v.Del("parse_mode")
+		apiResp, err = doTelegramPost(client, u, v)
+		if err != nil {
+			log.Printf("telegram: plaintext retry to %s failed (network): %v", out.ChatID, err)
+			return
+		}
+		if apiResp.Ok {
+			log.Printf("telegram: delivered to %s as plain text (%d chars)", out.ChatID, len(out.Content))
+			return
+		}
+		log.Printf("telegram: plaintext retry to %s failed: [%d] %s", out.ChatID, apiResp.ErrorCode, apiResp.Description)
+		return
+	}
+
+	// 429 — rate limited. Wait the requested duration and retry once.
+	if apiResp.ErrorCode == 429 {
+		wait := 5
+		if apiResp.Parameters != nil && apiResp.Parameters.RetryAfter > 0 {
+			wait = apiResp.Parameters.RetryAfter
+		}
+		log.Printf("telegram: rate limited for %s, waiting %ds", out.ChatID, wait)
+		time.Sleep(time.Duration(wait) * time.Second)
+		apiResp, err = doTelegramPost(client, u, v)
+		if err != nil {
+			log.Printf("telegram: retry after rate limit to %s failed (network): %v", out.ChatID, err)
+			return
+		}
+		if apiResp.Ok {
+			log.Printf("telegram: delivered to %s after rate-limit wait (%d chars)", out.ChatID, len(out.Content))
+			return
+		}
+		log.Printf("telegram: retry after rate limit to %s failed: [%d] %s", out.ChatID, apiResp.ErrorCode, apiResp.Description)
+		return
+	}
+
+	// 5xx — server error, retry up to 2 times with backoff.
+	if apiResp.ErrorCode >= 500 {
+		for attempt := 1; attempt <= 2; attempt++ {
+			log.Printf("telegram: server error for %s [%d], retry %d/2", out.ChatID, apiResp.ErrorCode, attempt)
+			time.Sleep(time.Duration(attempt) * time.Second)
+			apiResp, err = doTelegramPost(client, u, v)
+			if err != nil {
+				log.Printf("telegram: retry %d to %s failed (network): %v", attempt, out.ChatID, err)
+				continue
+			}
+			if apiResp.Ok {
+				log.Printf("telegram: delivered to %s on retry %d (%d chars)", out.ChatID, attempt, len(out.Content))
+				return
+			}
+		}
+		log.Printf("telegram: gave up on %s after server errors: [%d] %s", out.ChatID, apiResp.ErrorCode, apiResp.Description)
+		return
+	}
+
+	// Any other error code — log and move on.
+	log.Printf("telegram: send to %s failed: [%d] %s", out.ChatID, apiResp.ErrorCode, apiResp.Description)
+}
+
+// doTelegramPost performs the HTTP POST and parses the Telegram API response.
+func doTelegramPost(client *http.Client, u string, v url.Values) (telegramAPIResponse, error) {
+	var apiResp telegramAPIResponse
+	resp, err := client.PostForm(u, v)
+	if err != nil {
+		return apiResp, err
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	json.Unmarshal(body, &apiResp)
+	return apiResp, nil
 }
