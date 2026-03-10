@@ -1,2 +1,6 @@
 [build]
+builder = "DOCKERFILE"
 dockerfilePath = "docker/Dockerfile"
+
+[deploy]
+startCommand = "/entrypoint.sh gateway"
