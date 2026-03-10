@@ -166,9 +166,23 @@ func NewRootCmd() *cobra.Command {
 							if out.Content == "" {
 								continue
 							}
-							// Don't forward error messages — they're noise from transient LLM failures.
-							if strings.HasPrefix(out.Content, "Sorry, I encountered an error") {
-								log.Printf("heartbeat: suppressing error response (%d chars)", len(out.Content))
+							// Only forward heartbeat responses that indicate actual
+							// action was taken. Suppress routine "all done / no pending
+							// tasks" status checks — they're noise.
+							lower := strings.ToLower(out.Content)
+							suppress := strings.HasPrefix(out.Content, "Sorry, I encountered an error") ||
+								strings.Contains(lower, "no pending task") ||
+								strings.Contains(lower, "no further action") ||
+								strings.Contains(lower, "have been completed") ||
+								strings.Contains(lower, "have been executed") ||
+								strings.Contains(lower, "already been completed") ||
+								strings.Contains(lower, "no pending") ||
+								strings.Contains(lower, "no tasks") ||
+								strings.Contains(lower, "nothing to execute") ||
+								strings.Contains(lower, "no action") ||
+								strings.Contains(lower, "not due")
+							if suppress {
+								log.Printf("heartbeat: suppressing status-only response (%d chars)", len(out.Content))
 								continue
 							}
 							log.Printf("heartbeat: routing response to %s:%s (%d chars)", fbCh, fbChatID, len(out.Content))

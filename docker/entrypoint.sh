@@ -81,5 +81,12 @@ if [ -n "${PICOBOT_HB_CHANNEL}" ]; then
     "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
 fi
 
+if [ -n "${PICOBOT_HB_INTERVAL}" ]; then
+  echo "Applying heartbeat interval: ${PICOBOT_HB_INTERVAL}s..."
+  TMP=$(mktemp)
+  jq --argjson interval "${PICOBOT_HB_INTERVAL}" '.agents.defaults.heartbeatIntervalS = $interval' \
+    "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+fi
+
 echo "Starting picobot $@..."
 exec picobot "$@"
