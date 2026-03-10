@@ -151,6 +151,32 @@ func NewRootCmd() *cobra.Command {
 			}
 			heartbeat.StartHeartbeat(ctx, cfg.Agents.Defaults.Workspace, hbInterval, hub)
 
+			// Route heartbeat agent output to an interactive channel (e.g. Telegram).
+			// Without this, the agent's response is dropped because no "heartbeat"
+			// subscriber exists in the hub router.
+			if fbCh := cfg.Agents.Defaults.HeartbeatFallbackChannel; fbCh != "" {
+				fbChatID := cfg.Agents.Defaults.HeartbeatFallbackChatID
+				hbOut := hub.Subscribe("heartbeat")
+				go func() {
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case out := <-hbOut:
+							if out.Content == "" {
+								continue
+							}
+							log.Printf("heartbeat: routing response to %s:%s (%d chars)", fbCh, fbChatID, len(out.Content))
+							hub.Out <- chat.Outbound{
+								Channel: fbCh,
+								ChatID:  fbChatID,
+								Content: out.Content,
+							}
+						}
+					}
+				}()
+			}
+
 			// start telegram if enabled
 			if cfg.Channels.Telegram.Enabled {
 				if err := channels.StartTelegram(ctx, hub, cfg.Channels.Telegram.Token, cfg.Channels.Telegram.AllowFrom); err != nil {

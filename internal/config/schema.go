@@ -19,6 +19,12 @@ type AgentDefaults struct {
 	MaxToolIterations  int     `json:"maxToolIterations"`
 	HeartbeatIntervalS int     `json:"heartbeatIntervalS"`
 	RequestTimeoutS    int     `json:"requestTimeoutS"`
+
+	// HeartbeatFallbackChannel + HeartbeatFallbackChatID route the agent's
+	// heartbeat response to an interactive channel (e.g. "telegram") so the
+	// output isn't silently dropped when no heartbeat subscriber exists.
+	HeartbeatFallbackChannel string `json:"heartbeatFallbackChannel,omitempty"`
+	HeartbeatFallbackChatID  string `json:"heartbeatFallbackChatID,omitempty"`
 }
 
 type ChannelsConfig struct {
