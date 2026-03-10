@@ -151,50 +151,24 @@ func NewRootCmd() *cobra.Command {
 			}
 			heartbeat.StartHeartbeat(ctx, cfg.Agents.Defaults.Workspace, hbInterval, hub)
 
-			// Route heartbeat agent output to an interactive channel (e.g. Telegram).
-			// Without this, the agent's response is dropped because no "heartbeat"
-			// subscriber exists in the hub router.
-			if fbCh := cfg.Agents.Defaults.HeartbeatFallbackChannel; fbCh != "" {
-				fbChatID := cfg.Agents.Defaults.HeartbeatFallbackChatID
-				hbOut := hub.Subscribe("heartbeat")
-				go func() {
-					for {
-						select {
-						case <-ctx.Done():
-							return
-						case out := <-hbOut:
-							if out.Content == "" {
-								continue
-							}
-							// Only forward heartbeat responses that indicate actual
-							// action was taken. Suppress routine "all done / no pending
-							// tasks" status checks — they're noise.
-							lower := strings.ToLower(out.Content)
-							suppress := strings.HasPrefix(out.Content, "Sorry, I encountered an error") ||
-								strings.Contains(lower, "no pending task") ||
-								strings.Contains(lower, "no further action") ||
-								strings.Contains(lower, "have been completed") ||
-								strings.Contains(lower, "have been executed") ||
-								strings.Contains(lower, "already been completed") ||
-								strings.Contains(lower, "no pending") ||
-								strings.Contains(lower, "no tasks") ||
-								strings.Contains(lower, "nothing to execute") ||
-								strings.Contains(lower, "no action") ||
-								strings.Contains(lower, "not due")
-							if suppress {
-								log.Printf("heartbeat: suppressing status-only response (%d chars)", len(out.Content))
-								continue
-							}
-							log.Printf("heartbeat: routing response to %s:%s (%d chars)", fbCh, fbChatID, len(out.Content))
-							hub.Out <- chat.Outbound{
-								Channel: fbCh,
-								ChatID:  fbChatID,
-								Content: out.Content,
-							}
+			// Subscribe to "heartbeat" channel so the hub router doesn't
+			// drop messages, but do NOT forward to Telegram. The agent's
+			// actual deliverables (radar, pulse, brief) are sent via the
+			// send_message tool directly to the target channel. What arrives
+			// here is only the agent's internal status summary.
+			hbOut := hub.Subscribe("heartbeat")
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case out := <-hbOut:
+						if out.Content != "" {
+							log.Printf("heartbeat: response received (%d chars), not forwarding", len(out.Content))
 						}
 					}
-				}()
-			}
+				}
+			}()
 
 			// start telegram if enabled
 			if cfg.Channels.Telegram.Enabled {
