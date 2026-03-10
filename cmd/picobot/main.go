@@ -166,6 +166,11 @@ func NewRootCmd() *cobra.Command {
 							if out.Content == "" {
 								continue
 							}
+							// Don't forward error messages — they're noise from transient LLM failures.
+							if strings.HasPrefix(out.Content, "Sorry, I encountered an error") {
+								log.Printf("heartbeat: suppressing error response (%d chars)", len(out.Content))
+								continue
+							}
 							log.Printf("heartbeat: routing response to %s:%s (%d chars)", fbCh, fbChatID, len(out.Content))
 							hub.Out <- chat.Outbound{
 								Channel: fbCh,

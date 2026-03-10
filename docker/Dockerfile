@@ -27,7 +27,7 @@ RUN set -eux; \
 # ---- Runtime Stage ----
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata bash curl jq
+RUN apk add --no-cache ca-certificates tzdata bash curl jq git
 
 # Create non-root user
 RUN addgroup -S picobot && adduser -S picobot -G picobot

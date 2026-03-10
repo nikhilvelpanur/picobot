@@ -9,10 +9,23 @@ if [ ! -f "${CONFIG}" ]; then
   echo "First run detected — running onboard..."
   picobot onboard
   echo "✅ Onboard complete. Config at ${CONFIG}"
-  echo ""
-  echo "⚠️  You need to configure your API key and model."
-  echo "   Mount a config file or set environment variables."
-  echo ""
+fi
+
+# Restore workspace from GitHub repo if configured and not already cloned.
+# This ensures workspace data (memory, skills, HEARTBEAT.md) survives
+# container rebuilds even without a persistent volume.
+WORKSPACE="${PICOBOT_HOME}/workspace"
+if [ -n "${GOOBE_WORKSPACE_REPO}" ] && [ -n "${GITHUB_TOKEN}" ]; then
+  if [ ! -d "${WORKSPACE}/.git" ]; then
+    echo "Restoring workspace from ${GOOBE_WORKSPACE_REPO}..."
+    rm -rf "${WORKSPACE}"
+    git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GOOBE_WORKSPACE_REPO}.git" "${WORKSPACE}"
+    echo "✅ Workspace restored from GitHub"
+  else
+    echo "Workspace already linked to git, pulling latest..."
+    cd "${WORKSPACE}" && git pull --ff-only || true
+    cd /home/picobot
+  fi
 fi
 
 # Allow overriding config values via environment variables
