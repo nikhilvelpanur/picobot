@@ -11,44 +11,10 @@ import (
 	"github.com/local/picobot/internal/chat"
 )
 
-// StartHeartbeat starts a periodic check that reads HEARTBEAT.md and pushes
-// its content into the agent's inbound chat hub for processing.
+// StartHeartbeat is a no-op. The heartbeat loop is disabled — all deliverables
+// (CEO Brief, Company Pulse, etc.) are now on-demand via Telegram.
+// The agent still has access to HEARTBEAT.md, memory, and skills, so when the
+// user asks for a brief or pulse, it can compose and deliver one immediately.
 func StartHeartbeat(ctx context.Context, workspace string, interval time.Duration, hub *chat.Hub) {
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		log.Printf("heartbeat: started (every %v)", interval)
-		for {
-			select {
-			case <-ctx.Done():
-				log.Println("heartbeat: stopping")
-				return
-			case <-ticker.C:
-				path := filepath.Join(workspace, "HEARTBEAT.md")
-				data, err := os.ReadFile(path)
-				if err != nil {
-					// file doesn't exist or can't be read — skip silently
-					continue
-				}
-				content := strings.TrimSpace(string(data))
-				if content == "" {
-					continue
-				}
-
-				// Push heartbeat content into the agent loop for processing
-				log.Println("heartbeat: sending tasks to agent")
-				hub.In <- chat.Inbound{
-					Channel:  "heartbeat",
-					ChatID:   "system",
-					SenderID: "heartbeat",
-					Content: "[HEARTBEAT CHECK] Review and execute any pending tasks from HEARTBEAT.md.\n\n" +
-						"CRITICAL: You MUST use the `message` tool to send any deliverables. " +
-						"Your text response is internal only and will NOT be shown to anyone. " +
-						"If a task is due (CEO Brief, Company Pulse, Deadline Radar, Weekly Synthesis), " +
-						"compose it and send it using the message tool. " +
-						"If nothing is due, just respond briefly — no tool call needed.\n\n" + content,
-				}
-			}
-		}
-	}()
+	log.Println("heartbeat: disabled (on-demand mode)")
 }
