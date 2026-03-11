@@ -44,6 +44,13 @@ type AgentLoop struct {
 	model         string
 	maxIterations int
 	running       bool
+
+	// HeartbeatFallbackChannel + HeartbeatFallbackChatID configure where
+	// the message tool should target by default when processing heartbeat
+	// messages. This lets the agent send deliverables (CEO Brief, Pulse,
+	// etc.) to an interactive channel without explicit overrides.
+	HeartbeatFallbackChannel string
+	HeartbeatFallbackChatID  string
 }
 
 // NewAgentLoop creates a new AgentLoop with the given provider.
@@ -138,10 +145,18 @@ func (a *AgentLoop) Run(ctx context.Context) {
 				continue
 			}
 
-			// Set tool context (so message tool knows channel+chat)
+			// Set tool context (so message tool knows channel+chat).
+			// For heartbeat messages, use the configured fallback channel so
+			// that message() calls target Telegram (or another interactive
+			// channel) instead of the non-existent "heartbeat" channel.
+			toolChannel, toolChatID := msg.Channel, msg.ChatID
+			if msg.Channel == "heartbeat" && a.HeartbeatFallbackChannel != "" {
+				toolChannel = a.HeartbeatFallbackChannel
+				toolChatID = a.HeartbeatFallbackChatID
+			}
 			if mt := a.tools.Get("message"); mt != nil {
 				if mtool, ok := mt.(interface{ SetContext(string, string) }); ok {
-					mtool.SetContext(msg.Channel, msg.ChatID)
+					mtool.SetContext(toolChannel, toolChatID)
 				}
 			}
 			if ct := a.tools.Get("cron"); ct != nil {
@@ -212,11 +227,19 @@ func (a *AgentLoop) Run(ctx context.Context) {
 				a.sessions.Save(sess)
 			}
 
-			out := chat.Outbound{Channel: msg.Channel, ChatID: msg.ChatID, Content: finalContent}
-			select {
-			case a.hub.Out <- out:
-			default:
-				log.Println("Outbound channel full, dropping message")
+			// For system channels (heartbeat, cron), don't publish the final
+			// response — it's just an internal status summary. Deliverables
+			// (CEO Brief, Pulse, etc.) are sent during processing via the
+			// message tool, which targets the configured fallback channel.
+			if isSystemChannel(msg.Channel) {
+				log.Printf("heartbeat: processing complete (%d chars), deliverables sent via tool calls", len(finalContent))
+			} else {
+				out := chat.Outbound{Channel: msg.Channel, ChatID: msg.ChatID, Content: finalContent}
+				select {
+				case a.hub.Out <- out:
+				default:
+					log.Println("Outbound channel full, dropping message")
+				}
 			}
 		default:
 			// idle tick

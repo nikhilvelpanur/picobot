@@ -135,6 +135,8 @@ func NewRootCmd() *cobra.Command {
 				maxIter = 100
 			}
 			ag := agent.NewAgentLoop(hub, provider, model, maxIter, cfg.Agents.Defaults.Workspace, scheduler)
+			ag.HeartbeatFallbackChannel = cfg.Agents.Defaults.HeartbeatFallbackChannel
+			ag.HeartbeatFallbackChatID = cfg.Agents.Defaults.HeartbeatFallbackChatID
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
@@ -151,54 +153,20 @@ func NewRootCmd() *cobra.Command {
 			}
 			heartbeat.StartHeartbeat(ctx, cfg.Agents.Defaults.Workspace, hbInterval, hub)
 
-			// Route heartbeat responses to Telegram, but only when
-			// the response is an actual deliverable (CEO Brief, Company
-			// Pulse, Deadline Radar, Weekly Synthesis). Suppress routine
-			// "nothing pending" status checks.
-			if fbCh := cfg.Agents.Defaults.HeartbeatFallbackChannel; fbCh != "" {
-				fbChatID := cfg.Agents.Defaults.HeartbeatFallbackChatID
-				hbOut := hub.Subscribe("heartbeat")
-				go func() {
-					for {
-						select {
-						case <-ctx.Done():
-							return
-						case out := <-hbOut:
-							if out.Content == "" {
-								continue
-							}
-							lower := strings.ToLower(out.Content)
-							isDeliverable := strings.Contains(lower, "ceo brief") ||
-								strings.Contains(lower, "company pulse") ||
-								strings.Contains(lower, "pillar pulse") ||
-								strings.Contains(lower, "deadline radar") ||
-								strings.Contains(lower, "weekly synthesis")
-							if !isDeliverable {
-								log.Printf("heartbeat: suppressing non-deliverable response (%d chars)", len(out.Content))
-								continue
-							}
-							log.Printf("heartbeat: forwarding deliverable to %s:%s (%d chars)", fbCh, fbChatID, len(out.Content))
-							hub.Out <- chat.Outbound{
-								Channel: fbCh,
-								ChatID:  fbChatID,
-								Content: out.Content,
-							}
-						}
+			// Drain the "heartbeat" subscriber to prevent "no subscriber" log
+			// noise. Deliverables are now sent during agent processing via the
+			// message tool (which targets the fallback channel directly).
+			// The agent's final status response is suppressed in the agent loop.
+			hbOut := hub.Subscribe("heartbeat")
+			go func() {
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-hbOut:
 					}
-				}()
-			} else {
-				// No fallback configured — just drain to prevent "no subscriber" log noise.
-				hbOut := hub.Subscribe("heartbeat")
-				go func() {
-					for {
-						select {
-						case <-ctx.Done():
-							return
-						case <-hbOut:
-						}
-					}
-				}()
-			}
+				}
+			}()
 
 			// start telegram if enabled
 			if cfg.Channels.Telegram.Enabled {
