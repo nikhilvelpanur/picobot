@@ -41,7 +41,12 @@ func StartHeartbeat(ctx context.Context, workspace string, interval time.Duratio
 					Channel:  "heartbeat",
 					ChatID:   "system",
 					SenderID: "heartbeat",
-					Content:  "[HEARTBEAT CHECK] Review and execute any pending tasks from HEARTBEAT.md:\n\n" + content,
+					Content: "[HEARTBEAT CHECK] Review and execute any pending tasks from HEARTBEAT.md.\n\n" +
+						"CRITICAL: You MUST use the `message` tool to send any deliverables. " +
+						"Your text response is internal only and will NOT be shown to anyone. " +
+						"If a task is due (CEO Brief, Company Pulse, Deadline Radar, Weekly Synthesis), " +
+						"compose it and send it using the message tool. " +
+						"If nothing is due, just respond briefly — no tool call needed.\n\n" + content,
 				}
 			}
 		}
