@@ -73,20 +73,5 @@ if [ -n "${PICOBOT_MODEL}" ]; then
   jq --arg model "${PICOBOT_MODEL}" '.agents.defaults.model = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
 fi
 
-if [ -n "${PICOBOT_HB_CHANNEL}" ]; then
-  echo "Applying heartbeat fallback: ${PICOBOT_HB_CHANNEL}:${PICOBOT_HB_CHATID}..."
-  TMP=$(mktemp)
-  jq --arg ch "${PICOBOT_HB_CHANNEL}" --arg cid "${PICOBOT_HB_CHATID:-}" \
-    '.agents.defaults.heartbeatFallbackChannel = $ch | .agents.defaults.heartbeatFallbackChatID = $cid' \
-    "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
-
-if [ -n "${PICOBOT_HB_INTERVAL}" ]; then
-  echo "Applying heartbeat interval: ${PICOBOT_HB_INTERVAL}s..."
-  TMP=$(mktemp)
-  jq --argjson interval "${PICOBOT_HB_INTERVAL}" '.agents.defaults.heartbeatIntervalS = $interval' \
-    "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
-
 echo "Starting picobot $@..."
 exec picobot "$@"

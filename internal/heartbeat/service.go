@@ -3,9 +3,6 @@ package heartbeat
 import (
 	"context"
 	"log"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/local/picobot/internal/chat"
